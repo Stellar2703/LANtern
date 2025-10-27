@@ -3,7 +3,7 @@ import { Table, Button, Alert, Badge, Dropdown, DropdownButton, Spinner } from '
 import axios from 'axios';
 import './animations.css';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
 function MachineTable({ machines, onAction, onEdit, onDelete }) {
   const [selectedMachines, setSelectedMachines] = useState([]);

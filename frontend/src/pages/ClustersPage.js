@@ -6,7 +6,7 @@ import ClusterManager from '../components/ClusterManager';
 import ClusterCard from '../components/ClusterCard';
 import '../components/animations.css';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
 function ClustersPage() {
   const [clusters, setClusters] = useState([]);
@@ -93,45 +93,20 @@ function ClustersPage() {
 
   return (
     <div className="min-h-screen bg-gray-50 animate-fade-in">
-      {/* Unified Navigation and Action Bar */}
-      <div className="bg-white border-b-2 border-gray-200 py-4 mb-8 shadow-light">
+      {/* Action Bar */}
+      <div className="bg-white border-b-2 border-blue-200 py-4 mb-8 shadow-light">
         <div className="max-w-7xl mx-auto px-4">
           <div className="flex items-center justify-between flex-wrap gap-4">
             <div className="flex items-center gap-8">
-              <Link 
-                to="/" 
-                className="text-accent-800 text-3xl font-bold no-underline hover:text-primary-500 transition-colors duration-200"
-              >
-                <i className="fas fa-network-wired mr-2"></i>
-                LANturn
-              </Link>
+              <h1 className="text-blue-800 text-2xl font-bold">
+                <i className="fas fa-layer-group mr-2"></i>
+                Cluster Management
+              </h1>
             </div>
             <div className="flex items-center gap-4 flex-wrap">
-              <Link 
-                to="/machines" 
-                className="bg-gray-100 text-accent-800 border border-gray-200 px-5 py-3 rounded-lg font-medium text-sm transition-all duration-200 no-underline inline-flex items-center gap-2 hover:bg-blue-50 hover:border-primary-500"
-              >
-                <i className="fas fa-desktop"></i>
-                Machines
-              </Link>
-              <Link 
-                to="/clusters" 
-                className="bg-primary-500 text-white px-5 py-3 rounded-lg font-medium text-sm transition-all duration-200 no-underline inline-flex items-center gap-2 hover:bg-primary-600 hover:-translate-y-0.5 hover:shadow-lg"
-              >
-                <i className="fas fa-layer-group"></i>
-                Clusters
-              </Link>
-              <Button 
-                onClick={() => window.location.href = '/machines'} 
-                className="bg-gray-100 text-accent-800 border border-gray-200 px-5 py-3 rounded-lg font-medium text-sm transition-all duration-200 inline-flex items-center gap-2 hover:bg-blue-50 hover:border-primary-500"
-                variant="outline-primary"
-              >
-                <i className="fas fa-plus"></i>
-                Add Machine
-              </Button>
               <Button 
                 onClick={() => setShowClusterManager(true)} 
-                className="bg-primary-500 text-white px-5 py-3 rounded-lg font-medium text-sm transition-all duration-200 border-none inline-flex items-center gap-2 hover:bg-primary-600 hover:-translate-y-0.5 hover:shadow-lg"
+                className="bg-blue-500 text-white px-5 py-3 rounded-lg font-medium text-sm transition-all duration-200 border-none inline-flex items-center gap-2 hover:bg-blue-600 hover:-translate-y-0.5 hover:shadow-lg"
                 style={{ background: '#3498DB', border: 'none' }}
               >
                 <i className="fas fa-plus-circle"></i>

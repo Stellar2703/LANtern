@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Modal, Form, Alert, Spinner, Container } from 'react-bootstrap';
+import { Button, Modal, Form, Alert, Spinner, Container, Row, Col, ToggleButton, ToggleButtonGroup } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import MachineTable from '../components/MachineTable';
+import MachineCard from '../components/MachineCard';
 import ClusterManager from '../components/ClusterManager';
-import '../components/animations.css';
+import '../components/enhanced-animations.css';
 
-const API_BASE_URL = 'http://localhost:3001/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
 
 function MachinesPage() {
   const [machines, setMachines] = useState([]);
@@ -16,6 +17,7 @@ function MachinesPage() {
   const [editingMachine, setEditingMachine] = useState(null);
   const [action, setAction] = useState('');
   const [selectedMachines, setSelectedMachines] = useState([]);
+  const [viewMode, setViewMode] = useState('cards'); // 'cards' or 'table'
   const [newMachine, setNewMachine] = useState({
     name: '',
     mac_address: '',
@@ -176,87 +178,180 @@ function MachinesPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 animate-fade-in">
-      {/* Unified Navigation and Action Bar */}
-      <div className="bg-white border-b-2 border-gray-200 py-4 mb-8 shadow-light">
-        <div className="max-w-7xl mx-auto px-4">
-          <div className="flex items-center justify-between flex-wrap gap-4">
-            <div className="flex items-center gap-8">
-              <Link 
-                to="/" 
-                className="text-accent-800 text-3xl font-bold no-underline hover:text-primary-500 transition-colors duration-200"
-              >
-                <i className="fas fa-network-wired mr-2"></i>
-                LANturn
-              </Link>
-            </div>
-            <div className="flex items-center gap-4 flex-wrap">
-              <Link 
-                to="/machines" 
-                className="bg-primary-500 text-white px-5 py-3 rounded-lg font-medium text-sm transition-all duration-200 no-underline inline-flex items-center gap-2 hover:bg-primary-600 hover:-translate-y-0.5 hover:shadow-lg"
-              >
-                <i className="fas fa-desktop"></i>
-                Machines
-              </Link>
-              <Link 
-                to="/clusters" 
-                className="bg-gray-100 text-accent-800 border border-gray-200 px-5 py-3 rounded-lg font-medium text-sm transition-all duration-200 no-underline inline-flex items-center gap-2 hover:bg-blue-50 hover:border-primary-500"
-              >
-                <i className="fas fa-layer-group"></i>
-                Clusters
-              </Link>
-              <Button 
-                onClick={() => setShowAddModal(true)} 
-                className="bg-primary-500 text-white px-5 py-3 rounded-lg font-medium text-sm transition-all duration-200 border-none inline-flex items-center gap-2 hover:bg-primary-600 hover:-translate-y-0.5 hover:shadow-lg"
-                style={{ background: '#3498DB', border: 'none' }}
-              >
-                <i className="fas fa-plus"></i>
-                Add Machine
-              </Button>
-              <Button 
-                onClick={() => setShowClusterModal(true)} 
-                className="bg-gray-100 text-accent-800 border border-gray-200 px-5 py-3 rounded-lg font-medium text-sm transition-all duration-200 inline-flex items-center gap-2 hover:bg-blue-50 hover:border-primary-500"
-                variant="outline-primary"
-              >
-                <i className="fas fa-plus-circle"></i>
-                Add Cluster
-              </Button>
-            </div>
+    <div style={{ backgroundColor: '#f9fafb', minHeight: '100vh' }}>
+      <Container fluid className="py-4">
+        {/* Header Section */}
+        <div className="d-flex justify-content-between align-items-center mb-4">
+          <div>
+            <h1 className="h3 mb-1" style={{ color: '#1f2937', fontWeight: '600' }}>
+              Machine Management
+            </h1>
+            
+          </div>
+          <div className="d-flex gap-2">
+            <Button 
+              onClick={() => setShowAddModal(true)} 
+              className="d-flex align-items-center gap-2"
+              style={{ 
+                backgroundColor: '#2563eb',
+                border: 'none',
+                borderRadius: '0.5rem',
+                padding: '0.5rem 1rem',
+                fontSize: '0.875rem',
+                fontWeight: '500'
+              }}
+            >
+              <i className="fas fa-plus" style={{ fontSize: '0.75rem' }}></i>
+              Add Machine
+            </Button>
+            <Button 
+              onClick={() => setShowClusterModal(true)} 
+              variant="outline-primary"
+              className="d-flex align-items-center gap-2"
+              style={{ 
+                borderRadius: '0.5rem',
+                padding: '0.5rem 1rem',
+                fontSize: '0.875rem',
+                fontWeight: '500'
+              }}
+            >
+              <i className="fas fa-layer-group" style={{ fontSize: '0.75rem' }}></i>
+              Manage Clusters
+            </Button>
           </div>
         </div>
-      </div>
 
-      <div className="max-w-7xl mx-auto px-4">
+        {/* Alert Section */}
         {alert.show && (
           <Alert 
             variant={alert.variant} 
             onClose={() => setAlert({ ...alert, show: false })} 
             dismissible
-            className="rounded-lg border-none px-5 py-4 mb-4"
+            className="mb-3"
+            style={{
+              backgroundColor: alert.variant === 'success' ? '#dcfce7' : '#fee2e2',
+              border: `1px solid ${alert.variant === 'success' ? '#bbf7d0' : '#fecaca'}`,
+              color: alert.variant === 'success' ? '#166534' : '#991b1b',
+              borderRadius: '0.5rem'
+            }}
           >
+            <i className={`fas ${alert.variant === 'success' ? 'fa-check-circle' : 'fa-exclamation-triangle'} me-2`}></i>
             {alert.message}
           </Alert>
         )}
 
-        <div className="bg-white border border-gray-200 rounded-xl shadow-light overflow-hidden animate-fade-in">
-          {loading ? (
-            <div className="text-center py-12">
-              <div className="inline-block w-8 h-8 border-4 border-gray-300 border-t-primary-500 rounded-full animate-spin mb-4"></div>
-              <p className="text-gray-600">Loading machines...</p>
-            </div>
-          ) : (
-            <MachineTable 
-              machines={machines} 
-              onEdit={(machine) => {
-                setEditingMachine(machine);
-                setNewMachine(machine);
-                setShowEditModal(true);
-              }}
-              onDelete={handleDeleteMachine}
-              onAction={handleMachineAction}
-            />
-          )}
+        {/* Stats and View Toggle */}
+        <div className="d-flex justify-content-between align-items-center mb-4">
+          <div>
+            <h4 style={{ color: '#374151', fontWeight: '600', marginBottom: '0.25rem' }}>
+              {machines.length} Machine{machines.length !== 1 ? 's' : ''} Found
+            </h4>
+            <p className="text-muted mb-0" style={{ fontSize: '0.875rem' }}>
+              {machines.filter(m => m.status === 'online').length} online, {' '}
+              {machines.filter(m => m.status === 'offline').length} offline
+            </p>
+          </div>
+          <div className="d-flex align-items-center gap-2">
+            <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>View:</span>
+            <ToggleButtonGroup 
+              type="radio" 
+              name="viewMode" 
+              value={viewMode} 
+              onChange={setViewMode}
+              size="sm"
+            >
+              <ToggleButton 
+                id="cards-view" 
+                value="cards"
+                variant="outline-secondary"
+                style={{ 
+                  borderRadius: '0.375rem 0 0 0.375rem',
+                  border: '1px solid #d1d5db',
+                  fontSize: '0.875rem'
+                }}
+              >
+                <i className="fas fa-th me-1"></i>
+                Cards
+              </ToggleButton>
+              <ToggleButton 
+                id="table-view" 
+                value="table"
+                variant="outline-secondary"
+                style={{ 
+                  borderRadius: '0 0.375rem 0.375rem 0',
+                  border: '1px solid #d1d5db',
+                  fontSize: '0.875rem'
+                }}
+              >
+                <i className="fas fa-list me-1"></i>
+                Table
+              </ToggleButton>
+            </ToggleButtonGroup>
+          </div>
         </div>
+
+        {/* Content Section */}
+        {loading ? (
+          <div className="text-center py-5" style={{ 
+            backgroundColor: 'white', 
+            borderRadius: '0.75rem',
+            border: '1px solid #e5e7eb'
+          }}>
+            <div className="spinner-border text-primary mb-3" role="status">
+              <span className="visually-hidden">Loading...</span>
+            </div>
+            <p className="text-muted mb-0">Loading machines...</p>
+          </div>
+        ) : (
+          <div className="animate-fade-in">
+            {viewMode === 'cards' ? (
+              <Row className="g-4">
+                {machines.map((machine, index) => (
+                  <Col key={machine.id} lg={6} xl={4}>
+                    <MachineCard
+                      machine={machine}
+                      index={index}
+                      onAction={(machineId, actionType) => handleMachineAction([machineId], actionType)}
+                      onEdit={handleEditMachine}
+                      onDelete={handleDeleteMachine}
+                    />
+                  </Col>
+                ))}
+                {machines.length === 0 && (
+                  <Col xs={12}>
+                    <div className="text-center py-12 particle-bg" style={{ borderRadius: '16px' }}>
+                      <i className="fas fa-server" style={{ fontSize: '4rem', color: '#cbd5e1', marginBottom: '1rem' }}></i>
+                      <h4 className="text-muted mb-3">No machines found</h4>
+                      <p className="text-muted mb-4">Get started by adding your first machine to the network</p>
+                      <Button 
+                        onClick={() => setShowAddModal(true)}
+                        className="btn-hover-effect ripple-effect"
+                        style={{ 
+                          background: 'linear-gradient(135deg, #3b82f6, #1e40af)',
+                          border: 'none',
+                          borderRadius: '12px',
+                          padding: '12px 24px'
+                        }}
+                      >
+                        <i className="fas fa-plus me-2"></i>
+                        Add Your First Machine
+                      </Button>
+                    </div>
+                  </Col>
+                )}
+              </Row>
+            ) : (
+              <div className="bg-white border border-gray-200 rounded-xl shadow-light overflow-hidden">
+                <MachineTable 
+                  machines={machines} 
+                  onEdit={handleEditMachine}
+                  onDelete={handleDeleteMachine}
+                  onAction={handleMachineAction}
+                />
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Add Machine Modal */}
         <Modal show={showAddModal} onHide={() => setShowAddModal(false)} size="lg" className="fade">
@@ -491,7 +586,7 @@ function MachinesPage() {
       />
 
       {/* Password Confirmation Modal removed. Actions are now direct. */}
-      </div>
+      </Container>
     </div>
   );
 }

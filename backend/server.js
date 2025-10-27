@@ -1,4 +1,4 @@
-// Removed bcrypt import, no longer needed
+// Enhanced LANtern Backend with Authentication
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -6,12 +6,22 @@ const cors = require('cors');
 const mysql = require('mysql2/promise');
 const wol = require('wol');
 const { exec } = require('child_process');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
 
 const app = express();
-app.use(cors());
+
+// Enhanced CORS configuration
+app.use(cors({
+    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    credentials: true
+}));
+
 app.use(bodyParser.json());
+app.use(express.json({ limit: '10mb' }));
 
 const PORT = process.env.PORT || 3001;
+const JWT_SECRET = process.env.JWT_SECRET || 'fallback-secret-key';
 
 // Database connection
 const dbConfig = {
@@ -25,11 +35,142 @@ const dbConfig = {
 let db;
 
 async function initDb() {
-    db = await mysql.createConnection(dbConfig);
-    console.log('Connected to MySQL database');
+    try {
+        db = await mysql.createConnection(dbConfig);
+        console.log('Connected to MySQL database');
+        
+        // Create users table if it doesn't exist
+        await db.query(`
+            CREATE TABLE IF NOT EXISTS users (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                username VARCHAR(255) UNIQUE NOT NULL,
+                password_hash VARCHAR(255) NOT NULL,
+                role ENUM('admin', 'user') DEFAULT 'user',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                last_login TIMESTAMP NULL
+            )
+        `);
+        
+        // Create default admin user if none exists
+        const [users] = await db.query('SELECT COUNT(*) as count FROM users');
+        if (users[0].count === 0) {
+            const hashedPassword = await bcrypt.hash('admin123', 10);
+            await db.query(
+                'INSERT INTO users (username, password_hash, role) VALUES (?, ?, ?)',
+                ['admin', hashedPassword, 'admin']
+            );
+            console.log('Default admin user created (username: admin, password: admin123)');
+        }
+    } catch (err) {
+        console.error('Database initialization failed:', err);
+        process.exit(1);
+    }
 }
 
+// Authentication middleware
+const authenticateToken = async (req, res, next) => {
+    const authHeader = req.headers['authorization'];
+    const token = authHeader && authHeader.split(' ')[1];
+
+    if (!token) {
+        return res.status(401).json({ error: 'Access token required' });
+    }
+
+    try {
+        const decoded = jwt.verify(token, JWT_SECRET);
+        req.user = decoded;
+        next();
+    } catch (err) {
+        return res.status(403).json({ error: 'Invalid or expired token' });
+    }
+};
+
+// Input validation middleware
+const validateMachineInput = (req, res, next) => {
+    const { name, mac_address, ip_address } = req.body;
+    
+    if (!name || !name.trim()) {
+        return res.status(400).json({ error: 'Machine name is required' });
+    }
+    
+    if (!mac_address || !mac_address.match(/^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$/)) {
+        return res.status(400).json({ error: 'Valid MAC address is required' });
+    }
+    
+    if (!ip_address || !ip_address.match(/^(\d{1,3}\.){3}\d{1,3}$/)) {
+        return res.status(400).json({ error: 'Valid IP address is required' });
+    }
+    
+    next();
+};
+
 initDb().catch(err => console.error('Database connection failed:', err));
+
+// Authentication Routes
+app.post('/api/auth/login', async (req, res) => {
+    try {
+        const { username, password } = req.body;
+
+        if (!username || !password) {
+            return res.status(400).json({ error: 'Username and password are required' });
+        }
+
+        const [users] = await db.query('SELECT * FROM users WHERE username = ?', [username]);
+        
+        if (users.length === 0) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        const user = users[0];
+        const isValidPassword = await bcrypt.compare(password, user.password_hash);
+
+        if (!isValidPassword) {
+            return res.status(401).json({ error: 'Invalid credentials' });
+        }
+
+        // Update last login
+        await db.query('UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = ?', [user.id]);
+
+        const token = jwt.sign(
+            { 
+                userId: user.id, 
+                username: user.username, 
+                role: user.role 
+            },
+            JWT_SECRET,
+            { expiresIn: '24h' }
+        );
+
+        res.json({
+            message: 'Login successful',
+            token,
+            user: {
+                id: user.id,
+                username: user.username,
+                role: user.role
+            }
+        });
+    } catch (err) {
+        console.error('Login error:', err);
+        res.status(500).json({ error: 'Login failed' });
+    }
+});
+
+app.post('/api/auth/logout', authenticateToken, (req, res) => {
+    // In a more sophisticated app, you'd maintain a token blacklist
+    res.json({ message: 'Logout successful' });
+});
+
+app.get('/api/auth/verify', authenticateToken, (req, res) => {
+    res.json({ 
+        valid: true, 
+        user: {
+            id: req.user.userId,
+            username: req.user.username,
+            role: req.user.role
+        }
+    });
+});
 
 // Helper function to execute remote shutdown
 async function remoteShutdown(ip, username, password, action = 'shutdown') {
@@ -67,8 +208,8 @@ async function remoteShutdown(ip, username, password, action = 'shutdown') {
     });
 }
 
-// API Routes
-app.get('/api/machines', async (req, res) => {
+// API Routes - All protected except auth routes
+app.get('/api/machines', authenticateToken, async (req, res) => {
     try {
         const [rows] = await db.query('SELECT * FROM machines');
         res.json(rows);
@@ -78,26 +219,29 @@ app.get('/api/machines', async (req, res) => {
     }
 });
 
-app.post('/api/machines', async (req, res) => {
+app.post('/api/machines', authenticateToken, validateMachineInput, async (req, res) => {
     try {
         const { name, mac_address, ip_address, subnet_mask, broadcast_address, username, password } = req.body;
         
         console.log('Creating machine with:', { name, mac_address, ip_address, subnet_mask, broadcast_address, username, password: '***' });
         
+        // Hash the password before storing
+        const hashedPassword = password ? await bcrypt.hash(password, 10) : '';
+        
         const [result] = await db.query(
             'INSERT INTO machines (name, mac_address, ip_address, subnet_mask, broadcast_address, username, encrypted_password) VALUES (?, ?, ?, ?, ?, ?, ?)',
-            [name, mac_address, ip_address, subnet_mask, broadcast_address, username, password]
+            [name, mac_address, ip_address, subnet_mask || '255.255.255.0', broadcast_address, username, hashedPassword]
         );
         
         console.log('Machine created with ID:', result.insertId);
-        res.status(201).json({ id: result.insertId });
+        res.status(201).json({ id: result.insertId, message: 'Machine added successfully' });
     } catch (err) {
         console.error('Machine creation error:', err);
         res.status(500).json({ error: 'Failed to add machine' });
     }
 });
 
-app.post('/api/machines/:id/wake', async (req, res) => {
+app.post('/api/machines/:id/wake', authenticateToken, async (req, res) => {
     try {
         const machineId = req.params.id;
         const [rows] = await db.query('SELECT * FROM machines WHERE id = ?', [machineId]);
@@ -153,7 +297,7 @@ app.post('/api/machines/:id/wake', async (req, res) => {
             // Log the power event
             await db.query(
                 'INSERT INTO power_events (machine_id, action, status, initiated_by) VALUES (?, ?, ?, ?)',
-                [machineId, 'wake', 'success', req.body.initiated_by || 'system']
+                [machineId, 'wake', 'success', req.user.username || 'system']
             );
             
             res.json({ 
@@ -164,7 +308,7 @@ app.post('/api/machines/:id/wake', async (req, res) => {
         } else {
             await db.query(
                 'INSERT INTO power_events (machine_id, action, status, initiated_by) VALUES (?, ?, ?, ?)',
-                [machineId, 'wake', 'failed', req.body.initiated_by || 'system']
+                [machineId, 'wake', 'failed', req.user.username || 'system']
             );
             
             res.status(500).json({ error: 'All Wake-on-LAN packets failed to send' });
@@ -175,7 +319,7 @@ app.post('/api/machines/:id/wake', async (req, res) => {
     }
 });
 
-app.post('/api/machines/:id/shutdown', async (req, res) => {
+app.post('/api/machines/:id/shutdown', authenticateToken, async (req, res) => {
     try {
         const machineId = req.params.id;
         const [rows] = await db.query('SELECT * FROM machines WHERE id = ?', [machineId]);
@@ -192,7 +336,7 @@ app.post('/api/machines/:id/shutdown', async (req, res) => {
         // Log the power event
         await db.query(
             'INSERT INTO power_events (machine_id, action, status, initiated_by) VALUES (?, ?, ?, ?)',
-            [machineId, 'shutdown', 'success', req.body.initiated_by || 'system']
+            [machineId, 'shutdown', 'success', req.user.username || 'system']
         );
         
         res.json({ message: 'Shutdown command sent successfully' });
@@ -202,14 +346,14 @@ app.post('/api/machines/:id/shutdown', async (req, res) => {
         // Log failed event
         await db.query(
             'INSERT INTO power_events (machine_id, action, status, initiated_by) VALUES (?, ?, ?, ?)',
-            [req.params.id, 'shutdown', 'failed', req.body.initiated_by || 'system']
+            [req.params.id, 'shutdown', 'failed', req.user.username || 'system']
         );
         
         res.status(500).json({ error: 'Failed to shutdown machine' });
     }
 });
 
-app.post('/api/machines/cluster-action', async (req, res) => {
+app.post('/api/machines/cluster-action', authenticateToken, async (req, res) => {
     try {
         const { machineIds, action, initiated_by } = req.body;
         
@@ -323,7 +467,7 @@ app.post('/api/machines/cluster-action', async (req, res) => {
 });
 
 // Ping machine to check status
-app.post('/api/machines/:id/ping', async (req, res) => {
+app.post('/api/machines/:id/ping', authenticateToken, async (req, res) => {
     try {
         const machineId = req.params.id;
         const [rows] = await db.query('SELECT * FROM machines WHERE id = ?', [machineId]);
@@ -415,7 +559,7 @@ app.post('/api/machines/:id/ping', async (req, res) => {
 });
 
 // Cluster management endpoints
-app.get('/api/clusters', async (req, res) => {
+app.get('/api/clusters', authenticateToken, async (req, res) => {
     try {
         const [clusters] = await db.query('SELECT * FROM clusters');
         res.json(clusters);
@@ -425,7 +569,7 @@ app.get('/api/clusters', async (req, res) => {
     }
 });
 
-app.get('/api/clusters/:id', async (req, res) => {
+app.get('/api/clusters/:id', authenticateToken, async (req, res) => {
     try {
         const [cluster] = await db.query('SELECT * FROM clusters WHERE id = ?', [req.params.id]);
         if (cluster.length === 0) {
@@ -446,7 +590,7 @@ app.get('/api/clusters/:id', async (req, res) => {
     }
 });
 
-app.post('/api/clusters', async (req, res) => {
+app.post('/api/clusters', authenticateToken, async (req, res) => {
     try {
         const { name, description, machineIds } = req.body;
         
@@ -476,7 +620,7 @@ app.post('/api/clusters', async (req, res) => {
     }
 });
 
-app.put('/api/clusters/:id', async (req, res) => {
+app.put('/api/clusters/:id', authenticateToken, async (req, res) => {
     try {
         const { name, description, machineIds } = req.body;
         
@@ -503,7 +647,7 @@ app.put('/api/clusters/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/clusters/:id', async (req, res) => {
+app.delete('/api/clusters/:id', authenticateToken, async (req, res) => {
     try {
         await db.query('DELETE FROM clusters WHERE id = ?', [req.params.id]);
         res.json({ message: 'Cluster deleted successfully' });
@@ -513,7 +657,7 @@ app.delete('/api/clusters/:id', async (req, res) => {
     }
 });
 
-app.post('/api/clusters/:id/action', async (req, res) => {
+app.post('/api/clusters/:id/action', authenticateToken, async (req, res) => {
     try {
         const clusterId = req.params.id;
         const { action, password, initiated_by } = req.body;
@@ -623,7 +767,7 @@ app.post('/api/clusters/:id/action', async (req, res) => {
     }
 });
 
-app.put('/api/machines/:id', async (req, res) => {
+app.put('/api/machines/:id', authenticateToken, async (req, res) => {
     try {
         const machineId = req.params.id;
         const { name, mac_address, ip_address, subnet_mask, broadcast_address, username, password } = req.body;
@@ -643,7 +787,7 @@ app.put('/api/machines/:id', async (req, res) => {
     }
 });
 
-app.delete('/api/machines/:id', async (req, res) => {
+app.delete('/api/machines/:id', authenticateToken, async (req, res) => {
     try {
         const machineId = req.params.id;
         
@@ -663,7 +807,7 @@ app.delete('/api/machines/:id', async (req, res) => {
     }
 });
 
-app.patch('/api/machines/:id/status', async (req, res) => {
+app.patch('/api/machines/:id/status', authenticateToken, async (req, res) => {
     try {
         const machineId = req.params.id;
         const { is_active } = req.body;
