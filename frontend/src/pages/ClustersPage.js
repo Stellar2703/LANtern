@@ -6,7 +6,7 @@ import ClusterManager from '../components/ClusterManager';
 import ClusterCard from '../components/ClusterCard';
 import '../components/animations.css';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || '/api';
 
 function ClustersPage() {
   const [clusters, setClusters] = useState([]);

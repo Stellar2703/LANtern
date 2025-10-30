@@ -6,7 +6,7 @@ import MachineTable from '../components/MachineTable';
 import ClusterManager from '../components/ClusterManager';
 import '../components/enhanced-animations.css';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3001/api';
+const API_BASE_URL = process.env.REACT_APP_API_URL || '/api';
 
 function MachinesPage() {
   const [machines, setMachines] = useState([]);
