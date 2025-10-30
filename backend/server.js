@@ -1,4 +1,4 @@
-// Enhanced LANtern Backend with Authentication
+// Enhanced LANturn Backend with Authentication
 require('dotenv').config();
 const express = require('express');
 const bodyParser = require('body-parser');
@@ -238,6 +238,59 @@ app.post('/api/machines', authenticateToken, validateMachineInput, async (req, r
     } catch (err) {
         console.error('Machine creation error:', err);
         res.status(500).json({ error: 'Failed to add machine' });
+    }
+});
+
+// Reveal sensitive machine details (MAC/IP/username) protected by a server-side password.
+// Requires: Authorization header with Bearer JWT and JSON body { password: '...' }
+app.post('/api/machines/:id/reveal', authenticateToken, async (req, res) => {
+    try {
+        const machineId = req.params.id;
+        const { password } = req.body;
+
+        if (!password) {
+            return res.status(400).json({ error: 'Password is required' });
+        }
+
+        const expected = process.env.MACHINE_VIEW_PASSWORD;
+        if (!expected) {
+            return res.status(500).json({ error: 'Reveal password not configured on server' });
+        }
+
+        if (password !== expected) {
+            // Best-effort logging of failed attempts; ignore logging errors
+            try {
+                await db.query('INSERT INTO system_logs (level, category, message, details) VALUES (?, ?, ?, ?)', [
+                    'warning', 'auth', 'Failed machine reveal attempt',
+                    JSON.stringify({ user: req.user?.username || req.user?.id || 'unknown', machine_id: machineId, ip: req.ip })
+                ]);
+            } catch (e) {
+                // ignore
+            }
+
+            return res.status(403).json({ error: 'Invalid password' });
+        }
+
+        const [rows] = await db.query('SELECT id, name, mac_address, ip_address, username, encrypted_password FROM machines WHERE id = ?', [machineId]);
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Machine not found' });
+        }
+
+        // Best-effort logging of successful reveal
+        try {
+            await db.query('INSERT INTO system_logs (level, category, message, details) VALUES (?, ?, ?, ?)', [
+                'info', 'auth', 'Machine details revealed',
+                JSON.stringify({ user: req.user?.username || req.user?.id || 'unknown', machine_id: machineId, ip: req.ip })
+            ]);
+        } catch (e) {
+            // ignore logging errors
+        }
+
+        // Return sensitive fields only when correct password provided
+        res.json(rows[0]);
+    } catch (err) {
+        console.error('Reveal error:', err);
+        res.status(500).json({ error: 'Failed to reveal machine details' });
     }
 });
 
@@ -824,6 +877,321 @@ app.patch('/api/machines/:id/status', authenticateToken, async (req, res) => {
     } catch (err) {
         console.error('Machine status update error:', err);
         res.status(500).json({ error: 'Failed to update machine status' });
+    }
+});
+
+// ========================================================================
+// REMOTE KIOSK MODE FUNCTIONALITY
+// ========================================================================
+
+/**
+ * Enhanced remote kiosk control function with Windows registry modifications
+ * Supports starting and stopping kiosk mode on remote Windows machines
+ */
+async function remoteKioskControl(ip, username, password, action, kioskUrl = 'https://www.google.com') {
+    console.log(`\n=== REMOTE KIOSK ${action.toUpperCase()} DEBUG ===`);
+    console.log(`Target IP: ${ip}`);
+    console.log(`Username: ${username}`);
+    console.log(`Action: ${action}`);
+    console.log(`Kiosk URL: ${kioskUrl}`);
+    
+    const commands = {
+        start: [
+            // Disable Windows key and Alt+Tab
+            `reg add "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableTaskMgr /t REG_DWORD /d 1 /f`,
+            `reg add "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableLockWorkstation /t REG_DWORD /d 1 /f`,
+            `reg add "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer" /v NoClose /t REG_DWORD /d 1 /f`,
+            `reg add "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer" /v NoLogOff /t REG_DWORD /d 1 /f`,
+            // Start Chrome in kiosk mode
+            `start "" "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe" --kiosk --no-sandbox --disable-web-security --disable-features=TranslateUI --disable-extensions --disable-plugins --disable-default-apps "${kioskUrl}"`
+        ],
+        stop: [
+            // Re-enable Windows functionality
+            `reg delete "HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableTaskMgr /f`,
+            `reg delete "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System" /v DisableLockWorkstation /f`,
+            `reg delete "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer" /v NoClose /f`,
+            `reg delete "HKEY_CURRENT_USER\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\Explorer" /v NoLogOff /f`,
+            // Close Chrome processes
+            `taskkill /F /IM chrome.exe`,
+            `taskkill /F /IM "Google Chrome"`,
+        ]
+    };
+
+    const executeRemoteCommands = async (commandList) => {
+        const results = [];
+        
+        for (const command of commandList) {
+            try {
+                console.log(`Executing: ${command}`);
+                
+                // Use WMIC for remote command execution
+                const wmicCommand = `wmic /node:"${ip}" /user:"${username}" /password:"${password}" process call create "${command}"`;
+                
+                const result = await new Promise((resolve, reject) => {
+                    exec(wmicCommand, { timeout: 30000 }, (error, stdout, stderr) => {
+                        console.log(`Command result - Error: ${error ? error.message : 'None'}`);
+                        console.log(`STDOUT: ${stdout || 'Empty'}`);
+                        console.log(`STDERR: ${stderr || 'Empty'}`);
+                        
+                        if (error) {
+                            resolve({ success: false, error: error.message, command });
+                        } else if (stdout.includes('ReturnValue = 0') || stdout.includes('Successful completion')) {
+                            resolve({ success: true, command });
+                        } else {
+                            resolve({ success: false, error: stdout || stderr || 'Unknown error', command });
+                        }
+                    });
+                });
+                
+                results.push(result);
+                
+                // Add delay between commands
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                
+            } catch (error) {
+                console.error(`Failed to execute command: ${command}`, error);
+                results.push({ success: false, error: error.message, command });
+            }
+        }
+        
+        return results;
+    };
+
+    try {
+        const results = await executeRemoteCommands(commands[action]);
+        const successCount = results.filter(r => r.success).length;
+        const totalCount = results.length;
+        
+        console.log(`Kiosk ${action} completed: ${successCount}/${totalCount} commands successful`);
+        console.log(`=== END REMOTE KIOSK ${action.toUpperCase()} DEBUG ===\n`);
+        
+        if (successCount === 0) {
+            throw new Error(`All kiosk ${action} commands failed`);
+        }
+        
+        return {
+            success: true,
+            successCount,
+            totalCount,
+            results,
+            message: `Kiosk ${action} completed with ${successCount}/${totalCount} successful commands`
+        };
+        
+    } catch (error) {
+        console.error(`Kiosk ${action} failed:`, error);
+        console.log(`=== END REMOTE KIOSK ${action.toUpperCase()} DEBUG ===\n`);
+        throw error;
+    }
+}
+
+// API endpoint to start kiosk mode on a machine
+app.post('/api/machines/:id/kiosk/start', authenticateToken, async (req, res) => {
+    try {
+        const machineId = req.params.id;
+        const { url, password } = req.body;
+        
+        console.log(`Starting kiosk mode for machine ${machineId}`);
+        
+        const [rows] = await db.query('SELECT * FROM machines WHERE id = ?', [machineId]);
+        
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Machine not found' });
+        }
+        
+        const machine = rows[0];
+        const kioskUrl = url || 'https://www.google.com';
+        const machinePassword = password || machine.encrypted_password;
+        
+        // Execute kiosk start commands
+        const result = await remoteKioskControl(
+            machine.ip_address, 
+            machine.username, 
+            machinePassword, 
+            'start', 
+            kioskUrl
+        );
+        
+        // Log the power event
+        await db.query(
+            'INSERT INTO power_events (machine_id, action, status, initiated_by) VALUES (?, ?, ?, ?)',
+            [machineId, 'kiosk_start', 'success', req.user.username || 'system']
+        );
+        
+        res.json({ 
+            message: 'Kiosk mode started successfully',
+            machine: machine.name,
+            url: kioskUrl,
+            details: result
+        });
+        
+    } catch (err) {
+        console.error('Kiosk start error:', err);
+        
+        // Log failed event
+        await db.query(
+            'INSERT INTO power_events (machine_id, action, status, initiated_by) VALUES (?, ?, ?, ?)',
+            [req.params.id, 'kiosk_start', 'failed', req.user.username || 'system']
+        );
+        
+        res.status(500).json({ 
+            error: 'Failed to start kiosk mode',
+            details: err.message 
+        });
+    }
+});
+
+// API endpoint to stop kiosk mode on a machine
+app.post('/api/machines/:id/kiosk/stop', authenticateToken, async (req, res) => {
+    try {
+        const machineId = req.params.id;
+        const { password } = req.body;
+        
+        console.log(`Stopping kiosk mode for machine ${machineId}`);
+        
+        const [rows] = await db.query('SELECT * FROM machines WHERE id = ?', [machineId]);
+        
+        if (rows.length === 0) {
+            return res.status(404).json({ error: 'Machine not found' });
+        }
+        
+        const machine = rows[0];
+        const machinePassword = password || machine.encrypted_password;
+        
+        // Execute kiosk stop commands
+        const result = await remoteKioskControl(
+            machine.ip_address, 
+            machine.username, 
+            machinePassword, 
+            'stop'
+        );
+        
+        // Log the power event
+        await db.query(
+            'INSERT INTO power_events (machine_id, action, status, initiated_by) VALUES (?, ?, ?, ?)',
+            [machineId, 'kiosk_stop', 'success', req.user.username || 'system']
+        );
+        
+        res.json({ 
+            message: 'Kiosk mode stopped successfully',
+            machine: machine.name,
+            details: result
+        });
+        
+    } catch (err) {
+        console.error('Kiosk stop error:', err);
+        
+        // Log failed event
+        await db.query(
+            'INSERT INTO power_events (machine_id, action, status, initiated_by) VALUES (?, ?, ?, ?)',
+            [req.params.id, 'kiosk_stop', 'failed', req.user.username || 'system']
+        );
+        
+        res.status(500).json({ 
+            error: 'Failed to stop kiosk mode',
+            details: err.message 
+        });
+    }
+});
+
+// Bulk kiosk operations for clusters
+app.post('/api/machines/kiosk/bulk', authenticateToken, async (req, res) => {
+    try {
+        const { machineIds, action, url, password } = req.body;
+        
+        console.log(`Bulk kiosk ${action} for machines:`, machineIds);
+        
+        if (!machineIds || !Array.isArray(machineIds) || machineIds.length === 0) {
+            return res.status(400).json({ error: 'Invalid machine IDs' });
+        }
+        
+        if (!['start', 'stop'].includes(action)) {
+            return res.status(400).json({ error: 'Invalid action. Must be "start" or "stop"' });
+        }
+        
+        const [machines] = await db.query('SELECT * FROM machines WHERE id IN (?)', [machineIds]);
+        
+        if (machines.length === 0) {
+            return res.status(400).json({ error: 'No machines found' });
+        }
+        
+        // Execute all kiosk commands in parallel
+        const machinePromises = machines.map(async (machine) => {
+            try {
+                const machinePassword = password || machine.encrypted_password;
+                const kioskUrl = action === 'start' ? (url || 'https://www.google.com') : null;
+                
+                console.log(`Processing kiosk ${action} for machine: ${machine.name} (${machine.ip_address})`);
+                
+                const result = await remoteKioskControl(
+                    machine.ip_address, 
+                    machine.username, 
+                    machinePassword, 
+                    action, 
+                    kioskUrl
+                );
+                
+                // Log successful event
+                await db.query(
+                    'INSERT INTO power_events (machine_id, action, status, initiated_by) VALUES (?, ?, ?, ?)',
+                    [machine.id, `kiosk_${action}`, 'success', req.user.username || 'system']
+                );
+                
+                return { 
+                    machineId: machine.id, 
+                    machineName: machine.name,
+                    status: 'success',
+                    details: result
+                };
+                
+            } catch (err) {
+                console.error(`Failed to ${action} kiosk for machine ${machine.id}:`, err);
+                
+                // Log failed event
+                await db.query(
+                    'INSERT INTO power_events (machine_id, action, status, initiated_by) VALUES (?, ?, ?, ?)',
+                    [machine.id, `kiosk_${action}`, 'failed', req.user.username || 'system']
+                );
+                
+                return { 
+                    machineId: machine.id, 
+                    machineName: machine.name,
+                    status: 'failed', 
+                    error: err.message 
+                };
+            }
+        });
+        
+        // Wait for all parallel operations to complete
+        const results = await Promise.allSettled(machinePromises);
+        
+        // Process results from Promise.allSettled
+        const processedResults = results.map((result, index) => {
+            if (result.status === 'fulfilled') {
+                return result.value;
+            } else {
+                console.error(`Promise rejected for machine ${machines[index].id}:`, result.reason);
+                return { 
+                    machineId: machines[index].id, 
+                    machineName: machines[index].name,
+                    status: 'failed', 
+                    error: result.reason?.message || 'Unknown error' 
+                };
+            }
+        });
+        
+        const successCount = processedResults.filter(r => r.status === 'success').length;
+        
+        res.json({ 
+            message: `Bulk kiosk ${action} completed`,
+            totalMachines: machines.length,
+            successCount,
+            failureCount: machines.length - successCount,
+            results: processedResults
+        });
+        
+    } catch (err) {
+        console.error('Bulk kiosk operation error:', err);
+        res.status(500).json({ error: 'Failed to perform bulk kiosk operation' });
     }
 });
 

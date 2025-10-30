@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Table, Button, Alert, Badge, Dropdown, DropdownButton, Spinner } from 'react-bootstrap';
+import { Table, Button, Alert, Badge, Dropdown, DropdownButton, Spinner, Modal, Form } from 'react-bootstrap';
 import axios from 'axios';
 import './animations.css';
 
@@ -9,6 +9,12 @@ function MachineTable({ machines, onAction, onEdit, onDelete }) {
   const [selectedMachines, setSelectedMachines] = useState([]);
   const [machineStatuses, setMachineStatuses] = useState({});
   const [pingInProgress, setPingInProgress] = useState({});
+  const [showRevealModal, setShowRevealModal] = useState(false);
+  const [revealMachine, setRevealMachine] = useState(null);
+  const [revealPassword, setRevealPassword] = useState('');
+  const [revealLoading, setRevealLoading] = useState(false);
+  const [revealError, setRevealError] = useState(null);
+  const [revealedData, setRevealedData] = useState(null);
 
   // Ping verification function
   const verifyMachineStatus = async (machine) => {
@@ -49,6 +55,48 @@ function MachineTable({ machines, onAction, onEdit, onDelete }) {
     }
   };
 
+  const maskIp = (ip) => {
+    if (!ip) return 'hidden';
+    const parts = ip.split('.');
+    if (parts.length !== 4) return 'hidden';
+    return `***.***.***.${parts[3]}`;
+  };
+
+  const maskMac = (mac) => {
+    if (!mac) return 'hidden';
+    const parts = mac.split(':');
+    if (parts.length < 6) return '••:••:••:••:••:••';
+    return `${parts[0]}:${parts[1]}:XX:XX:XX:${parts[5]}`;
+  };
+
+  const maskUsername = (u) => {
+    if (!u) return 'hidden';
+    return u.length > 1 ? `${u[0]}***` : '***';
+  };
+
+  const openRevealModal = (machine) => {
+    setRevealMachine(machine);
+    setRevealedData(null);
+    setRevealPassword('');
+    setRevealError(null);
+    setShowRevealModal(true);
+  };
+
+  const handleRevealSubmit = async () => {
+    if (!revealMachine) return;
+    setRevealLoading(true);
+    setRevealError(null);
+    try {
+      const resp = await axios.post(`${API_BASE_URL}/machines/${revealMachine.id}/reveal`, { password: revealPassword });
+      setRevealedData(resp.data);
+    } catch (err) {
+      console.error('Reveal failed', err);
+      setRevealError(err.response?.data?.error || 'Reveal failed');
+    } finally {
+      setRevealLoading(false);
+    }
+  };
+
   // Removed auto-ping functionality - only ping when refresh button is clicked
 
   const handleMachineSelect = (machineId, isSelected) => {
@@ -75,19 +123,31 @@ function MachineTable({ machines, onAction, onEdit, onDelete }) {
 
     if (isPinging) {
       return (
-        <Badge bg="warning" className="d-flex align-items-center gap-1">
-          <div className="ping-spinner"></div>
-          Checking...
-        </Badge>
+        <div className="d-flex align-items-center gap-2">
+          <span className="badge bg-warning text-dark px-3 py-2" style={{ 
+            borderRadius: '12px',
+            fontSize: '0.75rem',
+            fontWeight: '500'
+          }}>
+            <div className="spinner-border spinner-border-sm me-2" role="status" style={{ width: '12px', height: '12px' }}></div>
+            Checking...
+          </span>
+        </div>
       );
     }
 
     if (pingStatus?.error) {
       return (
-        <Badge bg="danger" className="status-indicator idle" title="Machine is offline or unreachable">
-          <i className="fas fa-circle me-1"></i>
-          Idle
-        </Badge>
+        <div className="d-flex align-items-center gap-2">
+          <span className="badge bg-danger px-3 py-2" style={{ 
+            borderRadius: '12px',
+            fontSize: '0.75rem',
+            fontWeight: '500'
+          }}>
+            <i className="fas fa-times-circle me-1"></i>
+            Offline
+          </span>
+        </div>
       );
     }
 
@@ -95,77 +155,94 @@ function MachineTable({ machines, onAction, onEdit, onDelete }) {
     const statusSource = pingStatus ? 'Live' : 'Last Known';
     
     return isOnline ? (
-      <Badge bg="success" className="status-indicator active" title={pingStatus?.responseTime ? `${statusSource} - Response time: ${pingStatus.responseTime}ms` : `${statusSource} - Machine is online`}>
-        <i className="fas fa-circle me-1"></i>
-        Active
-        {pingStatus?.responseTime && (
-          <small className="ms-1">({pingStatus.responseTime}ms)</small>
-        )}
+      <div className="d-flex align-items-center gap-2">
+        <span className="badge bg-success px-3 py-2" style={{ 
+          borderRadius: '12px',
+          fontSize: '0.75rem',
+          fontWeight: '500'
+        }} title={pingStatus?.responseTime ? `${statusSource} - Response time: ${pingStatus.responseTime}ms` : `${statusSource} - Machine is online`}>
+          <i className="fas fa-circle me-1" style={{ fontSize: '0.6rem' }}></i>
+          Online
+          {pingStatus?.responseTime && (
+            <small className="ms-1">({pingStatus.responseTime}ms)</small>
+          )}
+        </span>
         {!pingStatus && (
-          <small className="ms-1 opacity-75">(Last Known)</small>
+          <small className="text-muted" style={{ fontSize: '0.7rem' }}>Last Known</small>
         )}
-      </Badge>
+      </div>
     ) : (
-      <Badge bg="danger" className="status-indicator idle" title={`${statusSource} - Machine is offline or unreachable`}>
-        <i className="fas fa-circle me-1"></i>
-        Idle
+      <div className="d-flex align-items-center gap-2">
+        <span className="badge bg-secondary px-3 py-2" style={{ 
+          borderRadius: '12px',
+          fontSize: '0.75rem',
+          fontWeight: '500'
+        }} title={`${statusSource} - Machine is offline or unreachable`}>
+          <i className="fas fa-circle me-1" style={{ fontSize: '0.6rem' }}></i>
+          Offline
+        </span>
         {!pingStatus && (
-          <small className="ms-1 opacity-75">(Last Known)</small>
+          <small className="text-muted" style={{ fontSize: '0.7rem' }}>Last Known</small>
         )}
-      </Badge>
+      </div>
     );
   };
 
   return (
     <div className="machine-table-container">
-      <div className="mb-4 p-3 bg-light rounded-3 shadow-sm">
-        <h5 className="mb-3">
-          <i className="fas fa-tools me-2 text-primary"></i>
-          Bulk Actions
-        </h5>
-        <div className="btn-group">
-          <Button
-            variant="success"
-            className="btn-animated me-2"
-            disabled={selectedMachines.length === 0}
-            onClick={() => onAction(selectedMachines, 'wake')}
-          >
-            <i className="fas fa-power-off me-2"></i> 
-            Start Selected ({selectedMachines.length})
-          </Button>
-          <Button
-            variant="warning"
-            className="btn-animated me-2"
-            disabled={selectedMachines.length === 0}
-            onClick={() => onAction(selectedMachines, 'restart')}
-          >
-            <i className="fas fa-redo me-2"></i> 
-            Restart Selected ({selectedMachines.length})
-          </Button>
-          <Button
-            variant="danger"
-            className="btn-animated"
-            disabled={selectedMachines.length === 0}
-            onClick={() => onAction(selectedMachines, 'shutdown')}
-          >
-            <i className="fas fa-power-off me-2"></i> 
-            Shutdown Selected ({selectedMachines.length})
-          </Button>
-        </div>
-        {selectedMachines.length > 0 && (
-          <div className="mt-2">
-            <small className="text-muted">
-              <i className="fas fa-info-circle me-1"></i>
-              {selectedMachines.length} PC(s) selected for bulk action
-            </small>
+      {selectedMachines.length > 0 && (
+        <div className="mb-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
+          <h6 className="mb-3 text-blue-800 fw-semibold">
+            <i className="fas fa-layer-group me-2"></i>
+            Bulk Actions ({selectedMachines.length} selected)
+          </h6>
+          <div className="d-flex gap-2 flex-wrap">
+            <Button
+              variant="success"
+              size="sm"
+              className="px-3 py-2"
+              style={{ borderRadius: '8px', fontSize: '0.875rem' }}
+              onClick={() => onAction(selectedMachines, 'wake')}
+            >
+              <i className="fas fa-power-off me-2"></i> 
+              Start All
+            </Button>
+            <Button
+              variant="warning"
+              size="sm"
+              className="px-3 py-2"
+              style={{ borderRadius: '8px', fontSize: '0.875rem' }}
+              onClick={() => onAction(selectedMachines, 'restart')}
+            >
+              <i className="fas fa-redo me-2"></i> 
+              Restart All
+            </Button>
+            <Button
+              variant="danger"
+              size="sm"
+              className="px-3 py-2"
+              style={{ borderRadius: '8px', fontSize: '0.875rem' }}
+              onClick={() => onAction(selectedMachines, 'shutdown')}
+            >
+              <i className="fas fa-power-off me-2"></i> 
+              Shutdown All
+            </Button>
           </div>
-        )}
-      </div>
+        </div>
+      )}
 
-      <Table striped bordered hover responsive className="shadow-sm rounded-3 overflow-hidden">
-        <thead className="table-dark">
-          <tr>
-            <th width="50">
+      <Table className="mb-0" style={{ fontSize: '0.9rem' }}>
+        <thead>
+          <tr style={{ 
+            backgroundColor: '#f8fafc', 
+            borderBottom: '2px solid #e2e8f0',
+          }}>
+            <th style={{ 
+              width: '50px', 
+              padding: '16px 12px',
+              borderRight: '1px solid #e2e8f0',
+              verticalAlign: 'middle'
+            }}>
               <div className="custom-checkbox">
                 <input
                   type="checkbox"
@@ -183,21 +260,43 @@ function MachineTable({ machines, onAction, onEdit, onDelete }) {
                 <label htmlFor="select-all-machines" className="checkbox-label"></label>
               </div>
             </th>
-            <th><i className="fas fa-tag me-2"></i>Name</th>
-            <th><i className="fas fa-globe me-2"></i>IP Address</th>
-            <th><i className="fas fa-network-wired me-2"></i>MAC Address</th>
-            <th>
+            <th style={{ 
+              padding: '16px',
+              borderRight: '1px solid #e2e8f0',
+              fontWeight: '600',
+              color: '#374151',
+              fontSize: '0.875rem'
+            }}>
+              <i className="fas fa-desktop me-2 text-blue-600"></i>Machine
+            </th>
+            <th style={{ 
+              padding: '16px',
+              borderRight: '1px solid #e2e8f0',
+              fontWeight: '600',
+              color: '#374151',
+              fontSize: '0.875rem'
+            }}>
+              <i className="fas fa-network-wired me-2 text-green-600"></i>Network
+            </th>
+            <th style={{ 
+              padding: '16px',
+              borderRight: '1px solid #e2e8f0',
+              fontWeight: '600',
+              color: '#374151',
+              fontSize: '0.875rem'
+            }}>
               <div className="d-flex align-items-center gap-2">
-                <i className="fas fa-signal me-2"></i>Status
+                <i className="fas fa-signal me-1 text-purple-600"></i>Status
                 <Button
-                  variant="outline-secondary"
+                  variant="link"
                   size="sm"
-                  className="d-flex align-items-center gap-1"
+                  className="p-0 text-decoration-none"
                   onClick={() => {
                     machines.forEach(machine => verifyMachineStatus(machine));
                   }}
                   disabled={Object.values(pingInProgress).some(Boolean)}
                   title="Refresh all machine statuses"
+                  style={{ fontSize: '0.75rem', color: '#6b7280' }}
                 >
                   {Object.values(pingInProgress).some(Boolean) ? (
                     <Spinner animation="border" size="sm" />
@@ -207,13 +306,32 @@ function MachineTable({ machines, onAction, onEdit, onDelete }) {
                 </Button>
               </div>
             </th>
-            <th width="400"><i className="fas fa-cogs me-2"></i>Actions</th>
+            <th style={{ 
+              padding: '16px',
+              fontWeight: '600',
+              color: '#374151',
+              fontSize: '0.875rem',
+              width: '150px'
+            }}>
+              <i className="fas fa-cogs me-2 text-orange-600"></i>Actions
+            </th>
           </tr>
         </thead>
         <tbody>
           {machines.map((machine, index) => (
-            <tr key={machine.id} className="table-row" style={{animationDelay: `${index * 0.1}s`}}>
-              <td>
+            <tr 
+              key={machine.id} 
+              className="table-row" 
+              style={{
+                animationDelay: `${index * 0.1}s`,
+                borderBottom: '1px solid #f1f5f9'
+              }}
+            >
+              <td style={{ 
+                padding: '16px 12px',
+                borderRight: '1px solid #f1f5f9',
+                verticalAlign: 'middle'
+              }}>
                 <div className="custom-checkbox">
                   <input
                     type="checkbox"
@@ -225,33 +343,64 @@ function MachineTable({ machines, onAction, onEdit, onDelete }) {
                   <label htmlFor={`machine-${machine.id}`} className="checkbox-label"></label>
                 </div>
               </td>
-              <td>
-                <strong className="text-primary">
-                  <i className="fas fa-desktop me-2"></i>
-                  {machine.name}
-                </strong>
+              <td style={{ 
+                padding: '16px',
+                borderRight: '1px solid #f1f5f9',
+                verticalAlign: 'middle'
+              }}>
+                <div className="d-flex flex-column">
+                  <span className="fw-semibold text-gray-900 mb-1" style={{ fontSize: '0.9rem' }}>
+                    {machine.name}
+                  </span>
+                  <span className="text-muted" style={{ fontSize: '0.75rem' }}>
+                    <i className="fas fa-user me-1"></i>
+                    {maskUsername(machine.username)}
+                  </span>
+                </div>
               </td>
-              <td>
-                <code className="bg-light p-1 rounded">{machine.ip_address}</code>
+              <td style={{ 
+                padding: '16px',
+                borderRight: '1px solid #f1f5f9',
+                verticalAlign: 'middle'
+              }}>
+                <div className="d-flex flex-column">
+                  <code className="bg-gray-100 px-2 py-1 rounded text-dark mb-1" style={{ fontSize: '0.8rem' }}>
+                    {maskIp(machine.ip_address)}
+                  </code>
+                  <code className="bg-gray-50 px-2 py-1 rounded text-muted" style={{ fontSize: '0.75rem' }}>
+                    {maskMac(machine.mac_address)}
+                  </code>
+                  <div className="mt-2">
+                    <Button variant="link" size="sm" onClick={() => openRevealModal(machine)} style={{ padding: 0 }}>
+                      <i className="fas fa-eye me-1"></i>Reveal
+                    </Button>
+                  </div>
+                </div>
               </td>
-              <td>
-                <code className="bg-light p-1 rounded">{machine.mac_address}</code>
-              </td>
-              <td>
+              <td style={{ 
+                padding: '16px',
+                borderRight: '1px solid #f1f5f9',
+                verticalAlign: 'middle'
+              }}>
                 {getStatusBadge(machine)}
               </td>
-              <td>
+              <td style={{ 
+                padding: '16px',
+                verticalAlign: 'middle'
+              }}>
                 <DropdownButton
                   id={`machine-actions-${machine.id}`}
                   title={
-                    <>
-                      <i className="fas fa-cog me-2"></i>
-                      Actions
-                    </>
+                    <span style={{ fontSize: '0.875rem' }}>
+                      <i className="fas fa-ellipsis-h me-1"></i>
+                    </span>
                   }
-                  variant="outline-primary"
+                  variant="outline-secondary"
                   size="sm"
-                  style={{ minWidth: '120px' }}
+                  style={{ 
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px'
+                  }}
                 >
                   <Dropdown.Item 
                     onClick={() => onAction([machine.id], 'wake')}
@@ -278,6 +427,9 @@ function MachineTable({ machines, onAction, onEdit, onDelete }) {
                   >
                     <i className="fas fa-edit me-2"></i>Edit
                   </Dropdown.Item>
+                  <Dropdown.Item onClick={() => openRevealModal(machine)} className="text-secondary">
+                    <i className="fas fa-eye me-2"></i>Reveal Sensitive
+                  </Dropdown.Item>
                   <Dropdown.Item 
                     onClick={() => onDelete(machine.id)}
                     className="text-danger"
@@ -292,12 +444,75 @@ function MachineTable({ machines, onAction, onEdit, onDelete }) {
       </Table>
       
       {machines.length === 0 && (
-        <div className="text-center p-5">
-          <i className="fas fa-server fa-3x text-muted mb-3"></i>
-          <h5 className="text-muted">No machines found</h5>
-          <p className="text-muted">Click "Add Machine" to get started</p>
+        <div className="text-center py-12">
+          <div className="mb-4">
+            <i className="fas fa-desktop" style={{ 
+              fontSize: '4rem', 
+              color: '#cbd5e1' 
+            }}></i>
+          </div>
+          <h5 className="text-gray-600 mb-2">No machines found</h5>
+          <p className="text-gray-500 mb-0" style={{ fontSize: '0.9rem' }}>
+            Add your first machine to start managing your network
+          </p>
         </div>
       )}
+      {/* Reveal Modal */}
+      <Modal show={showRevealModal} onHide={() => setShowRevealModal(false)} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Reveal Sensitive Details {revealMachine ? `- ${revealMachine.name}` : ''}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          {revealError && (
+            <Alert variant="danger">{revealError}</Alert>
+          )}
+
+          {!revealedData && (
+            <Form.Group>
+              <Form.Label>Enter reveal password</Form.Label>
+              <Form.Control
+                type="password"
+                value={revealPassword}
+                onChange={(e) => setRevealPassword(e.target.value)}
+                placeholder="Password"
+                autoFocus
+              />
+            </Form.Group>
+          )}
+
+          {revealedData && (
+            <div>
+              <h6 className="mb-2">Connection Details</h6>
+              <div className="mb-2">
+                <strong>IP:</strong>
+                <div className="mt-1"><code className="p-2 bg-gray-100 rounded">{revealedData.ip_address}</code></div>
+              </div>
+              <div className="mb-2">
+                <strong>MAC:</strong>
+                <div className="mt-1"><code className="p-2 bg-gray-100 rounded">{revealedData.mac_address}</code></div>
+              </div>
+              <div className="mb-2">
+                <strong>Username:</strong>
+                <div className="mt-1"><code className="p-2 bg-gray-100 rounded">{revealedData.username}</code></div>
+              </div>
+              <div className="mb-2">
+                <strong>Stored credential (hashed):</strong>
+                <div className="mt-1"><code className="p-2 bg-gray-100 rounded">{revealedData.encrypted_password}</code></div>
+              </div>
+            </div>
+          )}
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowRevealModal(false)}>
+            Close
+          </Button>
+          {!revealedData && (
+            <Button variant="primary" onClick={handleRevealSubmit} disabled={revealLoading || !revealPassword}>
+              {revealLoading ? <Spinner animation="border" size="sm" /> : 'Reveal'}
+            </Button>
+          )}
+        </Modal.Footer>
+      </Modal>
     </div>
   );
 }

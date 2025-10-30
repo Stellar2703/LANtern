@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Modal, Form, Alert, Spinner, Container, Row, Col, ToggleButton, ToggleButtonGroup } from 'react-bootstrap';
+import { Button, Modal, Form, Alert, Spinner, Container } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import axios from 'axios';
 import MachineTable from '../components/MachineTable';
-import MachineCard from '../components/MachineCard';
 import ClusterManager from '../components/ClusterManager';
 import '../components/enhanced-animations.css';
 
@@ -17,7 +16,7 @@ function MachinesPage() {
   const [editingMachine, setEditingMachine] = useState(null);
   const [action, setAction] = useState('');
   const [selectedMachines, setSelectedMachines] = useState([]);
-  const [viewMode, setViewMode] = useState('cards'); // 'cards' or 'table'
+  const [searchTerm, setSearchTerm] = useState('');
   const [newMachine, setNewMachine] = useState({
     name: '',
     mac_address: '',
@@ -177,6 +176,13 @@ function MachinesPage() {
     }
   };
 
+  // Filter machines based on search term
+  const filteredMachines = machines.filter(machine => 
+    machine.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    machine.ip_address.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    machine.mac_address.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div style={{ backgroundColor: '#f9fafb', minHeight: '100vh' }}>
       <Container fluid className="py-4">
@@ -240,53 +246,42 @@ function MachinesPage() {
           </Alert>
         )}
 
-        {/* Stats and View Toggle */}
+        {/* Stats and Search */}
         <div className="d-flex justify-content-between align-items-center mb-4">
           <div>
             <h4 style={{ color: '#374151', fontWeight: '600', marginBottom: '0.25rem' }}>
-              {machines.length} Machine{machines.length !== 1 ? 's' : ''} Found
+              {filteredMachines.length} of {machines.length} Machine{machines.length !== 1 ? 's' : ''}
             </h4>
             <p className="text-muted mb-0" style={{ fontSize: '0.875rem' }}>
-              {machines.filter(m => m.status === 'online').length} online, {' '}
-              {machines.filter(m => m.status === 'offline').length} offline
+              {machines.filter(m => m.is_active === 1).length} active, {' '}
+              {machines.filter(m => m.is_active === 0).length} inactive
             </p>
           </div>
-          <div className="d-flex align-items-center gap-2">
-            <span style={{ fontSize: '0.875rem', color: '#6b7280' }}>View:</span>
-            <ToggleButtonGroup 
-              type="radio" 
-              name="viewMode" 
-              value={viewMode} 
-              onChange={setViewMode}
-              size="sm"
-            >
-              <ToggleButton 
-                id="cards-view" 
-                value="cards"
-                variant="outline-secondary"
-                style={{ 
-                  borderRadius: '0.375rem 0 0 0.375rem',
+          <div className="d-flex align-items-center gap-3">
+            <div className="position-relative">
+              <i className="fas fa-search position-absolute" 
+                 style={{ 
+                   left: '12px', 
+                   top: '50%', 
+                   transform: 'translateY(-50%)', 
+                   color: '#6b7280',
+                   fontSize: '0.875rem'
+                 }}
+              ></i>
+              <Form.Control
+                type="text"
+                placeholder="Search machines..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                style={{
+                  paddingLeft: '2.5rem',
+                  borderRadius: '0.5rem',
                   border: '1px solid #d1d5db',
-                  fontSize: '0.875rem'
+                  fontSize: '0.875rem',
+                  width: '280px'
                 }}
-              >
-                <i className="fas fa-th me-1"></i>
-                Cards
-              </ToggleButton>
-              <ToggleButton 
-                id="table-view" 
-                value="table"
-                variant="outline-secondary"
-                style={{ 
-                  borderRadius: '0 0.375rem 0.375rem 0',
-                  border: '1px solid #d1d5db',
-                  fontSize: '0.875rem'
-                }}
-              >
-                <i className="fas fa-list me-1"></i>
-                Table
-              </ToggleButton>
-            </ToggleButtonGroup>
+              />
+            </div>
           </div>
         </div>
 
@@ -304,52 +299,14 @@ function MachinesPage() {
           </div>
         ) : (
           <div className="animate-fade-in">
-            {viewMode === 'cards' ? (
-              <Row className="g-4">
-                {machines.map((machine, index) => (
-                  <Col key={machine.id} lg={6} xl={4}>
-                    <MachineCard
-                      machine={machine}
-                      index={index}
-                      onAction={(machineId, actionType) => handleMachineAction([machineId], actionType)}
-                      onEdit={handleEditMachine}
-                      onDelete={handleDeleteMachine}
-                    />
-                  </Col>
-                ))}
-                {machines.length === 0 && (
-                  <Col xs={12}>
-                    <div className="text-center py-12 particle-bg" style={{ borderRadius: '16px' }}>
-                      <i className="fas fa-server" style={{ fontSize: '4rem', color: '#cbd5e1', marginBottom: '1rem' }}></i>
-                      <h4 className="text-muted mb-3">No machines found</h4>
-                      <p className="text-muted mb-4">Get started by adding your first machine to the network</p>
-                      <Button 
-                        onClick={() => setShowAddModal(true)}
-                        className="btn-hover-effect ripple-effect"
-                        style={{ 
-                          background: 'linear-gradient(135deg, #3b82f6, #1e40af)',
-                          border: 'none',
-                          borderRadius: '12px',
-                          padding: '12px 24px'
-                        }}
-                      >
-                        <i className="fas fa-plus me-2"></i>
-                        Add Your First Machine
-                      </Button>
-                    </div>
-                  </Col>
-                )}
-              </Row>
-            ) : (
-              <div className="bg-white border border-gray-200 rounded-xl shadow-light overflow-hidden">
-                <MachineTable 
-                  machines={machines} 
-                  onEdit={handleEditMachine}
-                  onDelete={handleDeleteMachine}
-                  onAction={handleMachineAction}
-                />
-              </div>
-            )}
+            <div className="bg-white border border-gray-200 rounded-xl shadow-light overflow-hidden">
+              <MachineTable 
+                machines={filteredMachines} 
+                onEdit={handleEditMachine}
+                onDelete={handleDeleteMachine}
+                onAction={handleMachineAction}
+              />
+            </div>
           </div>
         )}
 

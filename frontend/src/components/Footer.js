@@ -2,19 +2,30 @@ import React from 'react';
 
 function Footer() {
   return (
-    <footer className="mt-12 py-6 bg-gray-300 border-t border-gray-200">
-      <div className="max-w-7xl mx-auto px-4">
+    <footer 
+      className="py-3 border-top"
+      style={{
+        backgroundColor: '#ffffff',
+        borderColor: '#e5e7eb'
+      }}
+    >
+      <div className="container-fluid px-4">
         <div className="text-center">
-          <div className="mb-2 text-accent-800">
-            <i className="fas fa-network-wired mr-2"></i>
-            <strong>LANturn</strong> - Network Management System
+          <small style={{ color: '#6b7280', fontSize: '0.8rem' }}>
+            © 2025 LANturn - Network Management System
+          </small>
+          <div style={{ marginTop: '6px' }}>
+            <small style={{ color: '#6b7280', fontSize: '0.78rem' }}>
+              Developed by{' '}
+              <a href="https://github.com/Stellar2703" target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6', textDecoration: 'none' }}>
+                Shashwath V R
+              </a>
+              {' '}and{' '}
+              <a href="https://github.com/abby-ra" target="_blank" rel="noopener noreferrer" style={{ color: '#3b82f6', textDecoration: 'none' }}>
+                Abinaya R
+              </a>
+            </small>
           </div>
-          <div className="text-sm text-gray-600">
-            © 2025 LANturn Project. All rights reserved.
-          </div>
-          {/* <div className="text-xs mt-2 text-gray-600">
-            Developed by <strong>Abby Ra</strong> & <strong>Assistant AI</strong>
-          </div> */}
         </div>
       </div>
     </footer>

@@ -4,7 +4,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import ProtectedRoute from './components/ProtectedRoute';
 import LoginPage from './pages/LoginPage';
 import Footer from './components/Footer';
-import Navbar from './components/Navbar';
+import Sidebar from './components/Sidebar';
 import MachinesPage from './pages/MachinesPage';
 import ClustersPage from './pages/ClustersPage';
 import 'bootstrap/dist/css/bootstrap.min.css';
@@ -16,54 +16,65 @@ function AppContent() {
   const { isAuthenticated, login } = useAuth();
 
   return (
-    <div className="flex flex-col min-h-screen bg-gray-50">
-      {isAuthenticated() && <Navbar />}
+    <div className="d-flex" style={{ minHeight: '100vh' }}>
+      {/* Sidebar */}
+      {isAuthenticated() && <Sidebar />}
       
-      <div className="flex-grow">
-        <Routes>
-          <Route 
-            path="/login" 
-            element={
-              isAuthenticated() ? 
-                <Navigate to="/machines" replace /> : 
-                <LoginPage onLogin={login} />
-            } 
-          />
-          <Route 
-            path="/" 
-            element={
-              isAuthenticated() ? 
-                <Navigate to="/machines" replace /> : 
-                <Navigate to="/login" replace />
-            } 
-          />
-          <Route 
-            path="/machines" 
-            element={
-              <ProtectedRoute>
-                <MachinesPage />
-              </ProtectedRoute>
-            } 
-          />
-          <Route 
-            path="/clusters" 
-            element={
-              <ProtectedRoute>
-                <ClustersPage />
-              </ProtectedRoute>
-            } 
-          />
-          {/* Catch all route */}
-          <Route 
-            path="*" 
-            element={
-              <Navigate to={isAuthenticated() ? "/machines" : "/login"} replace />
-            } 
-          />
-        </Routes>
+      {/* Main Content */}
+      <div 
+        className="flex-grow-1 d-flex flex-column"
+        style={{
+          marginLeft: isAuthenticated() ? '280px' : '0',
+          backgroundColor: '#f8fafc',
+          minHeight: '100vh'
+        }}
+      >
+        <div className="flex-grow-1">
+          <Routes>
+            <Route 
+              path="/login" 
+              element={
+                isAuthenticated() ? 
+                  <Navigate to="/machines" replace /> : 
+                  <LoginPage onLogin={login} />
+              } 
+            />
+            <Route 
+              path="/" 
+              element={
+                isAuthenticated() ? 
+                  <Navigate to="/machines" replace /> : 
+                  <Navigate to="/login" replace />
+              } 
+            />
+            <Route 
+              path="/machines" 
+              element={
+                <ProtectedRoute>
+                  <MachinesPage />
+                </ProtectedRoute>
+              } 
+            />
+            <Route 
+              path="/clusters" 
+              element={
+                <ProtectedRoute>
+                  <ClustersPage />
+                </ProtectedRoute>
+              } 
+            />
+            {/* Catch all route */}
+            <Route 
+              path="*" 
+              element={
+                <Navigate to={isAuthenticated() ? "/machines" : "/login"} replace />
+              } 
+            />
+          </Routes>
+        </div>
+        
+        {isAuthenticated() && <Footer />}
       </div>
-      
-      {isAuthenticated() && <Footer />}
     </div>
   );
 }

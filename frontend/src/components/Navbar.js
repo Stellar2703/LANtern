@@ -29,7 +29,7 @@ function NavigationBar() {
           >
             <i className="fas fa-network-wired"></i>
           </div>
-          LANtern
+          LANturn
         </Navbar.Brand>
         
         <Navbar.Toggle aria-controls="basic-navbar-nav" />
