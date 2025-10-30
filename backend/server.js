@@ -11,9 +11,22 @@ const jwt = require('jsonwebtoken');
 
 const app = express();
 
-// Enhanced CORS configuration
+// CORS: configurable allowed origins. Use ALLOWED_ORIGINS env var (comma-separated)
+// Example: ALLOWED_ORIGINS=http://localhost:3000,https://app.example.com,http://192.0.2.12
+const rawAllowed = process.env.ALLOWED_ORIGINS || `${process.env.FRONTEND_URL || 'http://localhost:3000'}`;
+const allowedOrigins = rawAllowed.split(',').map(s => s.trim()).filter(Boolean);
+
 app.use(cors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: function(origin, callback) {
+        // allow requests with no origin (curl, mobile apps, same-origin)
+        if (!origin) return callback(null, true);
+        // allow wildcard
+        if (allowedOrigins.indexOf('*') !== -1) return callback(null, true);
+        if (allowedOrigins.indexOf(origin) !== -1) {
+            return callback(null, true);
+        }
+        return callback(new Error('CORS policy does not allow access from the specified Origin.'), false);
+    },
     credentials: true
 }));
 
